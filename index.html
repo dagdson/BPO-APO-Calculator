@@ -62,93 +62,29 @@
             );
         };
 
-        // --- Modal for pasting data from a spreadsheet (Upgraded with Checkboxes) ---
+        // --- Modal for pasting data from a spreadsheet ---
         const PasteDataModal = ({ isOpen, onClose, onPaste }) => {
             const [pastedText, setPastedText] = useState('');
-            const [pasteMode, setPasteMode] = useState('ADD_NEW');
-            const [fieldsToUpdate, setFieldsToUpdate] = useState({
-                preElectionWI: true,
-                preElectionNRI: true,
-                electionCode: false,
-                umi: false,
-            });
-            
-            const fieldDisplayNames = {
-                preElectionWI: 'WI',
-                preElectionNRI: 'NRI',
-                electionCode: 'Election Code',
-                umi: 'UMI',
-            };
-
-            const orderedFields = useMemo(() => {
-                const order = ['preElectionWI', 'preElectionNRI', 'electionCode', 'umi'];
-                return order.filter(field => fieldsToUpdate[field]);
-            }, [fieldsToUpdate]);
 
             if (!isOpen) return null;
 
-            const handleFieldToggle = (field) => {
-                setFieldsToUpdate(prev => ({ ...prev, [field]: !prev[field] }));
-            };
-
             const handleImport = () => {
-                onPaste(pastedText, pasteMode, fieldsToUpdate);
+                onPaste(pastedText);
                 onClose();
                 setPastedText('');
             };
             
-            const getExpectedColumnsText = () => {
-                if (pasteMode === 'ADD_NEW') {
-                    return 'Expected columns: Name, WI, NRI';
-                }
-                const fieldNames = {
-                    preElectionWI: 'WI',
-                    preElectionNRI: 'NRI',
-                    electionCode: 'Election Code',
-                    umi: 'UMI (Yes/No)',
-                };
-                const columns = ['Name', ...orderedFields.map(f => fieldNames[f])];
-                return `Expected columns: ${columns.join(', ')}`;
-            };
-
             return (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                     <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-2xl">
                         <h2 className="text-xl font-bold text-white mb-4">Paste Spreadsheet Data</h2>
-                        
-                        <div className="mb-4">
-                            <label className="block text-sm font-medium text-gray-300 mb-2">Paste Mode:</label>
-                            <select 
-                                value={pasteMode}
-                                onChange={(e) => setPasteMode(e.target.value)}
-                                className="w-full bg-gray-700 text-white p-2 rounded border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            >
-                                <option value="ADD_NEW">Add New Parties</option>
-                                <option value="UPDATE_EXISTING">Update Existing Parties by Name</option>
-                            </select>
-                        </div>
-
-                        {pasteMode === 'UPDATE_EXISTING' && (
-                            <div className="mb-4 p-3 bg-gray-700 rounded-lg">
-                                <label className="block text-sm font-medium text-gray-300 mb-2">Fields to Update:</label>
-                                <div className="grid grid-cols-2 gap-2">
-                                    {Object.keys(fieldsToUpdate).map(field => (
-                                        <label key={field} className="flex items-center space-x-2 cursor-pointer">
-                                            <input type="checkbox" checked={fieldsToUpdate[field]} onChange={() => handleFieldToggle(field)} className="h-4 w-4 rounded bg-gray-600 border-gray-500 text-blue-500 focus:ring-blue-500"/>
-                                            <span className="text-gray-200">{fieldDisplayNames[field]}</span>
-                                        </label>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-
-                        <p className="text-gray-400 mb-4">{getExpectedColumnsText()}</p>
+                        <p className="text-gray-400 mb-4">Copy rows from Excel or Sheets and paste below. The first three columns should be: <strong>Entity Name, Pre-Election WI, Pre-Election NRI</strong>.</p>
                         
                         <textarea
-                            className="w-full h-40 bg-gray-900 text-white p-2 rounded border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            className="w-full h-60 bg-gray-900 text-white p-2 rounded border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
                             value={pastedText}
                             onChange={(e) => setPastedText(e.target.value)}
-                            placeholder="Paste your tab-separated data here..."
+                            placeholder="Paste your tab-separated or comma-separated data here..."
                         ></textarea>
                         <div className="mt-6 flex justify-end gap-4">
                             <button onClick={onClose} className="py-2 px-4 bg-gray-600 hover:bg-gray-700 rounded-lg transition">Cancel</button>
@@ -383,76 +319,94 @@
                 updateParties(activeProject.parties.filter(p => p.id !== id));
             };
 
-            const handlePasteData = (pastedText, pasteMode, fieldsToUpdate) => {
-                const rows = pastedText.trim().split('\n');
+            const handlePasteData = (pastedText) => {
+                const MAX_ROWS = 5000;
+                let rows = pastedText.trim().split('\n');
                 
-                if (pasteMode === 'ADD_NEW') {
-                    const newParties = rows.map((row, index) => {
-                        const columns = row.split('\t');
-                        if (columns.length < 3) return null;
-                        return {
+                let warning = '';
+                if (rows.length > MAX_ROWS) {
+                    warning = `Pasted data exceeds 5,000 rows. Only the first 5,000 will be imported.\n\n`;
+                    rows = rows.slice(0, MAX_ROWS);
+                }
+
+                const errors = [];
+                let addedCount = 0;
+                let updatedCount = 0;
+                
+                const newParties = [...activeProject.parties];
+                const existingPartiesMap = new Map(newParties.map(p => [p.entityName.trim().toLowerCase(), p]));
+
+                rows.forEach((row, index) => {
+                    const delimiter = row.includes('\t') ? '\t' : ',';
+                    const columns = row.split(delimiter).map(c => c.trim().replace(/^"|"$/g, ''));
+
+                    if (columns.length < 3) {
+                        errors.push(`Row ${index + 1}: Skipped - row must have at least 3 columns (Name, WI, NRI).`);
+                        return;
+                    }
+                    
+                    const cleanNumber = (str) => {
+                        if (typeof str !== 'string' || !str) return NaN;
+                        let cleaned = str.replace(/,/g, '.'); // Handle European comma
+                        if (cleaned.split('.').length > 2) { // Handle thousand separators
+                             cleaned = cleaned.replace(/\.(?=.*\.)/g, '');
+                        }
+                        if (cleaned.endsWith('%')) {
+                            cleaned = parseFloat(cleaned) / 100;
+                        }
+                        return parseFloat(cleaned);
+                    };
+
+                    const nriRaw = columns[columns.length - 1];
+                    const wiRaw = columns[columns.length - 2];
+                    const name = columns.slice(0, -2).join(delimiter).trim();
+
+                    const wi = cleanNumber(wiRaw);
+                    const nri = cleanNumber(nriRaw);
+
+                    if (!name) {
+                        errors.push(`Row ${index + 1}: Skipped - Entity Name is missing.`);
+                        return;
+                    }
+                    if (isNaN(wi) || wi < 0 || wi > 1) {
+                        errors.push(`Row ${index + 1} ('${name}'): Skipped - Invalid WI value '${wiRaw}'. Must be a number between 0 and 1.`);
+                        return;
+                    }
+                    if (isNaN(nri) || nri < 0 || nri > 1) {
+                        errors.push(`Row ${index + 1} ('${name}'): Skipped - Invalid NRI value '${nriRaw}'. Must be a number between 0 and 1.`);
+                        return;
+                    }
+                    
+                    const existingParty = existingPartiesMap.get(name.toLowerCase());
+                    if (existingParty) {
+                        const partyIndex = newParties.findIndex(p => p.id === existingParty.id);
+                        if (partyIndex !== -1) {
+                            newParties[partyIndex].preElectionWI = wi;
+                            newParties[partyIndex].preElectionNRI = nri;
+                            updatedCount++;
+                        }
+                    } else {
+                        const newParty = {
                             id: Date.now() + index,
-                            entityName: columns[0].trim(),
-                            preElectionWI: parseFloat(columns[1]) || 0,
-                            preElectionNRI: parseFloat(columns[2]) || 0,
+                            entityName: name,
+                            preElectionWI: wi,
+                            preElectionNRI: nri,
                             electionCode: '1',
                             umi: false,
                         };
-                    }).filter(Boolean);
-                    if (newParties.length > 0) {
-                        updateParties([...activeProject.parties, ...newParties]);
+                        newParties.push(newParty);
+                        existingPartiesMap.set(name.toLowerCase(), newParty);
+                        addedCount++;
                     }
-                } else { // UPDATE_EXISTING
-                    const updates = new Map();
-                    const orderedFields = Object.keys(fieldsToUpdate).filter(f => fieldsToUpdate[f]);
-                    
-                    rows.forEach(row => {
-                        const columns = row.split('\t');
-                        if (columns.length < 2) return;
-                        const name = columns[0].trim();
-                        const values = columns.slice(1);
-                        updates.set(name, values);
-                    });
+                });
 
-                    const updatedParties = activeProject.parties.map(party => {
-                        if (updates.has(party.entityName)) {
-                            const valuesToUpdate = updates.get(party.entityName);
-                            const newParty = { ...party };
+                updateParties(newParties);
 
-                            orderedFields.forEach((field, index) => {
-                                const newValue = valuesToUpdate[index]?.trim();
-                                if (newValue !== undefined) {
-                                    switch(field) {
-                                        case 'preElectionWI':
-                                            newParty.preElectionWI = parseFloat(newValue) || party.preElectionWI;
-                                            break;
-                                        case 'preElectionNRI':
-                                            newParty.preElectionNRI = parseFloat(newValue) || party.preElectionNRI;
-                                            break;
-                                        case 'electionCode':
-                                            if (['0', '1', '2', '3'].includes(newValue)) {
-                                                newParty.electionCode = newValue;
-                                            }
-                                            break;
-                                        case 'umi':
-                                            const lowerVal = newValue.toLowerCase();
-                                            if (['true', 'yes', '1'].includes(lowerVal)) {
-                                                newParty.umi = true;
-                                            } else if (['false', 'no', '0'].includes(lowerVal)) {
-                                                newParty.umi = false;
-                                            }
-                                            break;
-                                        default:
-                                            break;
-                                    }
-                                }
-                            });
-                            return newParty;
-                        }
-                        return party;
-                    });
-                    updateParties(updatedParties);
+                let feedbackMessage = `${warning}Import complete.\n- Added: ${addedCount} rows\n- Updated: ${updatedCount} rows`;
+                if (errors.length > 0) {
+                    feedbackMessage += `\n- Skipped: ${errors.length} rows with errors:\n\n${errors.join('\n')}`;
                 }
+                alert(feedbackMessage);
             };
 
             const handleExport = () => {
