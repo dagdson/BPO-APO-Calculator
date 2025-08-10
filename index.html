@@ -388,7 +388,11 @@
                 
                 if (pasteMode === 'ADD_NEW') {
                     const newParties = rows.map((row, index) => {
+<<<<<<< HEAD
+                        const columns = row.split(/\s+/); // Use regex to split by any whitespace
+=======
                         const columns = row.split('\t');
+>>>>>>> 41307bb15e0e2e53380e0735c3fdc24bef3aa46a
                         if (columns.length < 3) return null;
                         return {
                             id: Date.now() + index,
@@ -407,7 +411,11 @@
                     const orderedFields = Object.keys(fieldsToUpdate).filter(f => fieldsToUpdate[f]);
                     
                     rows.forEach(row => {
+<<<<<<< HEAD
+                        const columns = row.split(/\s+/); // Use regex to split by any whitespace
+=======
                         const columns = row.split('\t');
+>>>>>>> 41307bb15e0e2e53380e0735c3fdc24bef3aa46a
                         if (columns.length < 2) return;
                         const name = columns[0].trim();
                         const values = columns.slice(1);
