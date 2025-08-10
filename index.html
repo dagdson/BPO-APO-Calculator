@@ -62,40 +62,6 @@
             );
         };
 
-        // --- Modal for pasting data from a spreadsheet ---
-        const PasteDataModal = ({ isOpen, onClose, onPaste }) => {
-            const [pastedText, setPastedText] = useState('');
-
-            if (!isOpen) return null;
-
-            const handleImport = () => {
-                onPaste(pastedText);
-                onClose();
-                setPastedText('');
-            };
-            
-            return (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                    <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-2xl">
-                        <h2 className="text-xl font-bold text-white mb-4">Paste Spreadsheet Data</h2>
-                        <p className="text-gray-400 mb-4">Copy rows from Excel or Sheets and paste below. The first three columns should be: <strong>Entity Name, Pre-Election WI, Pre-Election NRI</strong>.</p>
-                        
-                        <textarea
-                            className="w-full h-60 bg-gray-900 text-white p-2 rounded border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            value={pastedText}
-                            onChange={(e) => setPastedText(e.target.value)}
-                            placeholder="Paste your tab-separated or comma-separated data here..."
-                        ></textarea>
-                        <div className="mt-6 flex justify-end gap-4">
-                            <button onClick={onClose} className="py-2 px-4 bg-gray-600 hover:bg-gray-700 rounded-lg transition">Cancel</button>
-                            <button onClick={handleImport} className="py-2 px-4 bg-blue-600 hover:bg-blue-700 rounded-lg transition">Import Data</button>
-                        </div>
-                    </div>
-                </div>
-            );
-        };
-
-
         // --- Initial Data & Core Logic ---
         const getInitialParties = () => [
             { id: 1, entityName: 'Big Oil Co.', preElectionWI: 0.50, preElectionNRI: 0.4375, electionCode: '3', umi: false },
@@ -244,9 +210,9 @@
             const [projects, setProjects] = useState([getNewProject('BPO/APO Interest Calculator')]);
             const [activeProjectId, setActiveProjectId] = useState(projects[0].id);
             const [isExportReady, setIsExportReady] = useState(false);
-            const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
             const [columnWidths, setColumnWidths] = useState([250, 150, 80, 150, 150, 150, 150, 180, 180, 80]);
             const resizingColumnIndex = useRef(null);
+            const fileInputRef = useRef(null);
 
             const activeProject = useMemo(() => projects.find(p => p.id === activeProjectId) || projects[0], [projects, activeProjectId]);
             const { calculatedParties, summary } = useMemo(() => activeProject ? calculateResults(activeProject.parties, activeProject.isApo) : { calculatedParties: [], summary: {} }, [activeProject]);
@@ -317,96 +283,6 @@
 
             const removeParty = (id) => {
                 updateParties(activeProject.parties.filter(p => p.id !== id));
-            };
-
-            const handlePasteData = (pastedText) => {
-                const MAX_ROWS = 5000;
-                let rows = pastedText.trim().split('\n');
-                
-                let warning = '';
-                if (rows.length > MAX_ROWS) {
-                    warning = `Pasted data exceeds 5,000 rows. Only the first 5,000 will be imported.\n\n`;
-                    rows = rows.slice(0, MAX_ROWS);
-                }
-
-                const errors = [];
-                let addedCount = 0;
-                let updatedCount = 0;
-                
-                const newParties = [...activeProject.parties];
-                const existingPartiesMap = new Map(newParties.map(p => [p.entityName.trim().toLowerCase(), p]));
-
-                rows.forEach((row, index) => {
-                    const delimiter = row.includes('\t') ? '\t' : ',';
-                    const columns = row.split(delimiter).map(c => c.trim().replace(/^"|"$/g, ''));
-
-                    if (columns.length < 3) {
-                        errors.push(`Row ${index + 1}: Skipped - row must have at least 3 columns (Name, WI, NRI).`);
-                        return;
-                    }
-                    
-                    const cleanNumber = (str) => {
-                        if (typeof str !== 'string' || !str) return NaN;
-                        let cleaned = str.replace(/,/g, '.'); // Handle European comma
-                        if (cleaned.split('.').length > 2) { // Handle thousand separators
-                             cleaned = cleaned.replace(/\.(?=.*\.)/g, '');
-                        }
-                        if (cleaned.endsWith('%')) {
-                            cleaned = parseFloat(cleaned) / 100;
-                        }
-                        return parseFloat(cleaned);
-                    };
-
-                    const nriRaw = columns[columns.length - 1];
-                    const wiRaw = columns[columns.length - 2];
-                    const name = columns.slice(0, -2).join(delimiter).trim();
-
-                    const wi = cleanNumber(wiRaw);
-                    const nri = cleanNumber(nriRaw);
-
-                    if (!name) {
-                        errors.push(`Row ${index + 1}: Skipped - Entity Name is missing.`);
-                        return;
-                    }
-                    if (isNaN(wi) || wi < 0 || wi > 1) {
-                        errors.push(`Row ${index + 1} ('${name}'): Skipped - Invalid WI value '${wiRaw}'. Must be a number between 0 and 1.`);
-                        return;
-                    }
-                    if (isNaN(nri) || nri < 0 || nri > 1) {
-                        errors.push(`Row ${index + 1} ('${name}'): Skipped - Invalid NRI value '${nriRaw}'. Must be a number between 0 and 1.`);
-                        return;
-                    }
-                    
-                    const existingParty = existingPartiesMap.get(name.toLowerCase());
-                    if (existingParty) {
-                        const partyIndex = newParties.findIndex(p => p.id === existingParty.id);
-                        if (partyIndex !== -1) {
-                            newParties[partyIndex].preElectionWI = wi;
-                            newParties[partyIndex].preElectionNRI = nri;
-                            updatedCount++;
-                        }
-                    } else {
-                        const newParty = {
-                            id: Date.now() + index,
-                            entityName: name,
-                            preElectionWI: wi,
-                            preElectionNRI: nri,
-                            electionCode: '1',
-                            umi: false,
-                        };
-                        newParties.push(newParty);
-                        existingPartiesMap.set(name.toLowerCase(), newParty);
-                        addedCount++;
-                    }
-                });
-
-                updateParties(newParties);
-
-                let feedbackMessage = `${warning}Import complete.\n- Added: ${addedCount} rows\n- Updated: ${updatedCount} rows`;
-                if (errors.length > 0) {
-                    feedbackMessage += `\n- Skipped: ${errors.length} rows with errors:\n\n${errors.join('\n')}`;
-                }
-                alert(feedbackMessage);
             };
 
             const handleExport = () => {
@@ -531,6 +407,49 @@
                 });
             }, [calculatedParties]);
 
+            const handleImportClick = () => {
+                fileInputRef.current.click();
+            };
+
+            const handleFileImport = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    const data = new Uint8Array(evt.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const sheetName = workbook.SheetNames.find(name => name.toLowerCase() === 'party detail');
+                    if (!sheetName) {
+                        alert("Could not find a 'Party Detail' sheet in the imported file.");
+                        return;
+                    }
+                    const worksheet = workbook.Sheets[sheetName];
+                    const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+                    const newParties = jsonData.map((row, index) => ({
+                        id: Date.now() + index,
+                        entityName: row['Entity Name'] || '',
+                        electionCode: String(row['Election Code'] || '1'),
+                        umi: String(row['UMI']).toLowerCase() === 'yes',
+                        preElectionWI: parseFloat(row['Pre-Election WI']) || 0,
+                        preElectionNRI: parseFloat(row['Pre-Election NRI']) || 0,
+                    }));
+
+                    const newProject = {
+                        id: Date.now(),
+                        title: file.name.replace('.xlsx', ''),
+                        isApo: false,
+                        parties: newParties,
+                    };
+
+                    setProjects(prev => [...prev, newProject]);
+                    setActiveProjectId(newProject.id);
+                };
+                reader.readAsArrayBuffer(file);
+                e.target.value = ''; // Reset file input
+            };
+
 
             if (!activeProject) {
                 return (
@@ -555,7 +474,7 @@
 
             return (
                 <>
-                    <PasteDataModal isOpen={isPasteModalOpen} onClose={() => setIsPasteModalOpen(false)} onPaste={handlePasteData} />
+                    <input type="file" ref={fileInputRef} onChange={handleFileImport} style={{ display: 'none' }} accept=".xlsx" />
                     <div className="bg-gray-900 text-gray-200 min-h-screen font-sans p-4 sm:p-6 lg:p-8">
                         <div className="max-w-7xl mx-auto">
                             <header className="mb-4">
@@ -583,8 +502,8 @@
                                      <Tooltip text="Add Party">
                                         <button onClick={addParty} className="bg-purple-600 hover:bg-purple-700 text-white font-bold p-2 rounded-lg"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" /></svg></button>
                                     </Tooltip>
-                                    <Tooltip text="Paste Data">
-                                        <button onClick={() => setIsPasteModalOpen(true)} className="bg-orange-600 hover:bg-orange-700 text-white font-bold p-2 rounded-lg"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" /><path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" /></svg></button>
+                                    <Tooltip text="Import Project">
+                                        <button onClick={handleImportClick} className="bg-orange-600 hover:bg-orange-700 text-white font-bold p-2 rounded-lg"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4 4a2 2 0 012-2h8a2 2 0 012 2v12a1 1 0 110 2h-3.382l-.724-1.447A1 1 0 0011 16H9a1 1 0 00-.894.553L7.382 18H4a2 2 0 01-2-2V4zm5 3a1 1 0 011-1h2a1 1 0 110 2H10a1 1 0 01-1-1zm-1 4a1 1 0 100 2h4a1 1 0 100-2H8z" clipRule="evenodd" /></svg></button>
                                     </Tooltip>
                                     <Tooltip text="Export to XLSX">
                                         <button onClick={handleExport} disabled={!isExportReady} className="bg-green-600 hover:bg-green-700 text-white font-bold p-2 rounded-lg disabled:bg-gray-500"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" /></svg></button>
