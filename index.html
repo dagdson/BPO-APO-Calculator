@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BPO/APO Calculator</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React Libraries -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel to transpile JSX in the browser -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-gray-900">
+    <!-- This is the root element where the React application will be mounted. -->
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, useMemo, useRef } = React;
+
+        // --- Helper Components ---
+        const Tooltip = ({ children, text }) => {
+          const [show, setShow] = useState(false);
+          return (
+            <div className="relative flex items-center" onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
+              {children}
+              {show && (
+                <div className="absolute bottom-full mb-2 px-2 py-1 text-sm text-white bg-gray-700 rounded-md shadow-lg z-10 whitespace-nowrap">
+                  {text}
+                </div>
+              )}
+            </div>
+          );
+        };
+
+        const EditableNumericCell = ({ value, onCommit }) => {
+            const [displayValue, setDisplayValue] = useState(String(value));
+
+            useEffect(() => {
+                if (parseFloat(displayValue) !== value && !isNaN(value)) {
+                    setDisplayValue(String(value));
+                }
+            }, [value]);
+
+            const handleChange = (e) => {
+                setDisplayValue(e.target.value);
+            };
+
+            const handleBlur = () => {
+                onCommit(parseFloat(displayValue) || 0);
+            };
+
+            return (
+                <input
+                    type="text"
+                    value={displayValue}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                    className="bg-transparent w-full focus:outline-none focus:ring-1 focus:ring-blue-500 rounded px-1 text-right"
+                />
+            );
+        };
+
+        // --- Modal for pasting data from a spreadsheet (Upgraded with Checkboxes) ---
+        const PasteDataModal = ({ isOpen, onClose, onPaste }) => {
+            const [pastedText, setPastedText] = useState('');
+            const [pasteMode, setPasteMode] = useState('ADD_NEW');
+            const [fieldsToUpdate, setFieldsToUpdate] = useState({
+                preElectionWI: true,
+                preElectionNRI: true,
+                electionCode: false,
+                umi: false,
+            });
+            
+            const fieldDisplayNames = {
+                preElectionWI: 'WI',
+                preElectionNRI: 'NRI',
+                electionCode: 'Election Code',
+                umi: 'UMI',
+            };
+
+            const orderedFields = useMemo(() => {
+                const order = ['preElectionWI', 'preElectionNRI', 'electionCode', 'umi'];
+                return order.filter(field => fieldsToUpdate[field]);
+            }, [fieldsToUpdate]);
+
+            if (!isOpen) return null;
+
+            const handleFieldToggle = (field) => {
+                setFieldsToUpdate(prev => ({ ...prev, [field]: !prev[field] }));
+            };
+
+            const handleImport = () => {
+                onPaste(pastedText, pasteMode, fieldsToUpdate);
+                onClose();
+                setPastedText('');
+            };
+            
+            const getExpectedColumnsText = () => {
+                if (pasteMode === 'ADD_NEW') {
+                    return 'Expected columns: Name, WI, NRI';
+                }
+                const fieldNames = {
+                    preElectionWI: 'WI',
+                    preElectionNRI: 'NRI',
+                    electionCode: 'Election Code',
+                    umi: 'UMI (Yes/No)',
+                };
+                const columns = ['Name', ...orderedFields.map(f => fieldNames[f])];
+                return `Expected columns: ${columns.join(', ')}`;
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-2xl">
+                        <h2 className="text-xl font-bold text-white mb-4">Paste Spreadsheet Data</h2>
+                        
+                        <div className="mb-4">
+                            <label className="block text-sm font-medium text-gray-300 mb-2">Paste Mode:</label>
+                            <select 
+                                value={pasteMode}
+                                onChange={(e) => setPasteMode(e.target.value)}
+                                className="w-full bg-gray-700 text-white p-2 rounded border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                                <option value="ADD_NEW">Add New Parties</option>
+                                <option value="UPDATE_EXISTING">Update Existing Parties by Name</option>
+                            </select>
+                        </div>
+
+                        {pasteMode === 'UPDATE_EXISTING' && (
+                            <div className="mb-4 p-3 bg-gray-700 rounded-lg">
+                                <label className="block text-sm font-medium text-gray-300 mb-2">Fields to Update:</label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {Object.keys(fieldsToUpdate).map(field => (
+                                        <label key={field} className="flex items-center space-x-2 cursor-pointer">
+                                            <input type="checkbox" checked={fieldsToUpdate[field]} onChange={() => handleFieldToggle(field)} className="h-4 w-4 rounded bg-gray-600 border-gray-500 text-blue-500 focus:ring-blue-500"/>
+                                            <span className="text-gray-200">{fieldDisplayNames[field]}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        <p className="text-gray-400 mb-4">{getExpectedColumnsText()}</p>
+                        
+                        <textarea
+                            className="w-full h-40 bg-gray-900 text-white p-2 rounded border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            value={pastedText}
+                            onChange={(e) => setPastedText(e.target.value)}
+                            placeholder="Paste your tab-separated data here..."
+                        ></textarea>
+                        <div className="mt-6 flex justify-end gap-4">
+                            <button onClick={onClose} className="py-2 px-4 bg-gray-600 hover:bg-gray-700 rounded-lg transition">Cancel</button>
+                            <button onClick={handleImport} className="py-2 px-4 bg-blue-600 hover:bg-blue-700 rounded-lg transition">Import Data</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+
+        // --- Initial Data & Core Logic ---
+        const getInitialParties = () => [
+            { id: 1, entityName: 'Big Oil Co.', preElectionWI: 0.50, preElectionNRI: 0.4375, electionCode: '3', umi: false },
+            { id: 2, entityName: 'Small Operator LLC', preElectionWI: 0.25, preElectionNRI: 0.21875, electionCode: '1', umi: false },
+            { id: 3, entityName: 'Non-Consent Partner', preElectionWI: 0.15, preElectionNRI: 0.13125, electionCode: '1', umi: false },
+            { id: 4, entityName: 'Force-Pooled UMI', preElectionWI: 0.10, preElectionNRI: 0.0875, electionCode: '0', umi: true },
+        ];
+
+        const getNewProject = (title) => ({
+            id: Date.now(),
+            title: title,
+            isApo: false,
+            parties: getInitialParties(),
+        });
+
+        const calculateResults = (parties, isApo) => {
+            const round = (num) => Math.round((num + Number.EPSILON) * 1e8) / 1e8;
+            
+            // --- APO LOGIC ---
+            if (isApo) {
+                const calculatedParties = parties.map(p => ({
+                    ...p,
+                    resultingBPOWI: p.preElectionWI,
+                    resultingBPONRI: p.preElectionNRI,
+                    additionalWIAcquired: 0,
+                    additionalNRIAcquired: 0,
+                }));
+
+                const totalResultingWI = calculatedParties.reduce((sum, p) => sum + p.resultingBPOWI, 0);
+                const totalResultingNRI = calculatedParties.reduce((sum, p) => sum + p.resultingBPONRI, 0);
+
+                const summary = {
+                    consentWI: round(totalResultingWI),
+                    consentNRI: round(totalResultingNRI),
+                    nonConsentWI: 0,
+                    nonConsentNRI: 0,
+                    totalWI: round(totalResultingWI),
+                    totalNRI: round(totalResultingNRI),
+                    wiFlag: Math.abs(round(totalResultingWI) - 1.0) > 1e-8,
+                    absorptionFlag: false,
+                };
+                return { calculatedParties, summary };
+            }
+
+            // --- BPO LOGIC ---
+            let nonConsentWI_pool = 0;
+            let nonConsentNRI_pool = 0;
+
+            const consentingParties = [];
+            const excessCarryingParties = [];
+
+            parties.forEach(p => {
+                const isNonConsent = p.electionCode === '0';
+                const isUmiBPO = p.umi && !isApo;
+
+                if (isNonConsent || isUmiBPO) {
+                    nonConsentWI_pool += p.preElectionWI;
+                    if (!p.umi) {
+                        nonConsentNRI_pool += p.preElectionNRI;
+                    }
+                }
+
+                if (['1', '2', '3'].includes(p.electionCode)) {
+                    consentingParties.push(p);
+                    if (p.electionCode === '3') {
+                        excessCarryingParties.push(p);
+                    }
+                }
+            });
+
+            const totalConsentingWI = consentingParties.reduce((sum, p) => sum + p.preElectionWI, 0);
+            const totalExcessCarryingWI = excessCarryingParties.reduce((sum, p) => sum + p.preElectionWI, 0);
+
+            let unclaimedWI = 0;
+            let unclaimedNRI = 0;
+            const acquisitions = {};
+
+            if (totalConsentingWI > 0) {
+                consentingParties.forEach(p => {
+                    const proportionalShareWI = (p.preElectionWI / totalConsentingWI) * nonConsentWI_pool;
+                    const proportionalShareNRI = (p.preElectionWI / totalConsentingWI) * nonConsentNRI_pool;
+
+                    if (p.electionCode === '1') {
+                        unclaimedWI += proportionalShareWI;
+                        unclaimedNRI += proportionalShareNRI;
+                        acquisitions[p.id] = { wi: 0, nri: 0 };
+                    } else {
+                        acquisitions[p.id] = { wi: proportionalShareWI, nri: proportionalShareNRI };
+                    }
+                });
+            }
+
+            if (unclaimedWI > 0 && totalExcessCarryingWI > 0) {
+                excessCarryingParties.forEach(p => {
+                    const excessShare = (p.preElectionWI / totalExcessCarryingWI);
+                    acquisitions[p.id].wi += unclaimedWI * excessShare;
+                    acquisitions[p.id].nri += unclaimedNRI * excessShare;
+                });
+            }
+
+            const calculatedParties = parties.map(p => {
+                let resultingBPOWI = 0;
+                let resultingBPONRI = 0;
+                const additionalWIAcquired = acquisitions[p.id]?.wi || 0;
+                const additionalNRIAcquired = acquisitions[p.id]?.nri || 0;
+
+                if (p.umi && !isApo) {
+                    resultingBPOWI = 0;
+                    resultingBPONRI = round(p.preElectionWI * 0.16);
+                } else if (p.electionCode === '0') {
+                    resultingBPOWI = 0;
+                    resultingBPONRI = 0;
+                } else {
+                    resultingBPOWI = p.preElectionWI + additionalWIAcquired;
+                    resultingBPONRI = p.preElectionNRI + additionalNRIAcquired;
+                }
+
+                return { ...p, resultingBPOWI: round(resultingBPOWI), resultingBPONRI: round(resultingBPONRI), additionalWIAcquired: round(additionalWIAcquired), additionalNRIAcquired: round(additionalNRIAcquired) };
+            });
+            
+            const totalResultingWI = calculatedParties.reduce((sum, p) => sum + p.resultingBPOWI, 0);
+            const totalResultingNRI = calculatedParties.reduce((sum, p) => sum + p.resultingBPONRI, 0);
+            const totalNonConsentWI = parties.reduce((sum, p) => (p.electionCode === '0' || (p.umi && !isApo)) ? sum + p.preElectionWI : sum, 0);
+            const totalNonConsentNRI = parties.reduce((sum, p) => (p.electionCode === '0' && !p.umi) ? sum + p.preElectionNRI : sum, 0);
+            
+            const finalConsentWI = totalResultingWI;
+            const finalConsentNRI = totalResultingNRI;
+
+            const summary = {
+                consentWI: round(finalConsentWI),
+                consentNRI: round(finalConsentNRI),
+                nonConsentWI: round(totalNonConsentWI),
+                nonConsentNRI: round(totalNonConsentNRI),
+                totalWI: round(totalResultingWI),
+                totalNRI: round(totalResultingNRI),
+                wiFlag: Math.abs(round(totalResultingWI) - 1.0) > 1e-8,
+                absorptionFlag: Math.abs(round(nonConsentWI_pool) - round(calculatedParties.reduce((sum, p) => sum + p.additionalWIAcquired, 0))) > 1e-8,
+            };
+            
+            return { calculatedParties, summary };
+        };
+
+
+        // --- Main Application Component ---
+        const App = () => {
+            const [projects, setProjects] = useState([getNewProject('BPO/APO Interest Calculator')]);
+            const [activeProjectId, setActiveProjectId] = useState(projects[0].id);
+            const [isExportReady, setIsExportReady] = useState(false);
+            const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
+            const [columnWidths, setColumnWidths] = useState([250, 150, 80, 150, 150, 150, 150, 180, 180, 80]);
+            const resizingColumnIndex = useRef(null);
+
+            const activeProject = useMemo(() => projects.find(p => p.id === activeProjectId) || projects[0], [projects, activeProjectId]);
+            const { calculatedParties, summary } = useMemo(() => activeProject ? calculateResults(activeProject.parties, activeProject.isApo) : { calculatedParties: [], summary: {} }, [activeProject]);
+
+            useEffect(() => {
+                const scriptId = 'xlsx-script';
+                if (!document.getElementById(scriptId)) {
+                    const script = document.createElement('script');
+                    script.id = scriptId;
+                    script.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+                    script.async = true;
+                    script.onload = () => setIsExportReady(true);
+                    document.body.appendChild(script);
+                } else {
+                    setIsExportReady(true);
+                }
+            }, []);
+
+            const updateProject = (projectId, updatedData) => {
+                setProjects(projs => projs.map(p => p.id === projectId ? { ...p, ...updatedData } : p));
+            };
+            
+            const updateParties = (newParties) => {
+                updateProject(activeProjectId, { parties: newParties });
+            };
+
+            const handleAddProject = () => {
+                const newProj = getNewProject('New Project');
+                setProjects([...projects, newProj]);
+                setActiveProjectId(newProj.id);
+            };
+
+            const handleDuplicateProject = () => {
+                if (!activeProject) return;
+                const newProj = {
+                    ...JSON.parse(JSON.stringify(activeProject)),
+                    id: Date.now(),
+                    title: `${activeProject.title} (Copy)`,
+                };
+                setProjects([...projects, newProj]);
+                setActiveProjectId(newProj.id);
+            };
+
+            const handleDeleteProject = () => {
+                if (projects.length <= 1) {
+                    alert("You cannot delete the last project.");
+                    return;
+                }
+                const remainingProjects = projects.filter(p => p.id !== activeProjectId);
+                setProjects(remainingProjects);
+                setActiveProjectId(remainingProjects[0].id);
+            };
+
+            const handlePartyChange = (id, field, value) => {
+                const newParties = activeProject.parties.map(p => {
+                    if (p.id === id) {
+                        return { ...p, [field]: value };
+                    }
+                    return p;
+                });
+                updateParties(newParties);
+            };
+
+            const addParty = () => {
+                const newParty = { id: Date.now(), entityName: 'New Party', preElectionWI: 0, preElectionNRI: 0, electionCode: '1', umi: false };
+                updateParties([...activeProject.parties, newParty]);
+            };
+
+            const removeParty = (id) => {
+                updateParties(activeProject.parties.filter(p => p.id !== id));
+            };
+
+            const handlePasteData = (pastedText, pasteMode, fieldsToUpdate) => {
+                const rows = pastedText.trim().split('\n');
+                
+                if (pasteMode === 'ADD_NEW') {
+                    const newParties = rows.map((row, index) => {
+                        const columns = row.split('\t');
+                        if (columns.length < 3) return null;
+                        return {
+                            id: Date.now() + index,
+                            entityName: columns[0].trim(),
+                            preElectionWI: parseFloat(columns[1]) || 0,
+                            preElectionNRI: parseFloat(columns[2]) || 0,
+                            electionCode: '1',
+                            umi: false,
+                        };
+                    }).filter(Boolean);
+                    if (newParties.length > 0) {
+                        updateParties([...activeProject.parties, ...newParties]);
+                    }
+                } else { // UPDATE_EXISTING
+                    const updates = new Map();
+                    const orderedFields = Object.keys(fieldsToUpdate).filter(f => fieldsToUpdate[f]);
+                    
+                    rows.forEach(row => {
+                        const columns = row.split('\t');
+                        if (columns.length < 2) return;
+                        const name = columns[0].trim();
+                        const values = columns.slice(1);
+                        updates.set(name, values);
+                    });
+
+                    const updatedParties = activeProject.parties.map(party => {
+                        if (updates.has(party.entityName)) {
+                            const valuesToUpdate = updates.get(party.entityName);
+                            const newParty = { ...party };
+
+                            orderedFields.forEach((field, index) => {
+                                const newValue = valuesToUpdate[index]?.trim();
+                                if (newValue !== undefined) {
+                                    switch(field) {
+                                        case 'preElectionWI':
+                                            newParty.preElectionWI = parseFloat(newValue) || party.preElectionWI;
+                                            break;
+                                        case 'preElectionNRI':
+                                            newParty.preElectionNRI = parseFloat(newValue) || party.preElectionNRI;
+                                            break;
+                                        case 'electionCode':
+                                            if (['0', '1', '2', '3'].includes(newValue)) {
+                                                newParty.electionCode = newValue;
+                                            }
+                                            break;
+                                        case 'umi':
+                                            const lowerVal = newValue.toLowerCase();
+                                            if (['true', 'yes', '1'].includes(lowerVal)) {
+                                                newParty.umi = true;
+                                            } else if (['false', 'no', '0'].includes(lowerVal)) {
+                                                newParty.umi = false;
+                                            }
+                                            break;
+                                        default:
+                                            break;
+                                    }
+                                }
+                            });
+                            return newParty;
+                        }
+                        return party;
+                    });
+                    updateParties(updatedParties);
+                }
+            };
+
+            const handleExport = () => {
+                if (!isExportReady || !activeProject) {
+                    alert("Export function is not ready or no active project selected.");
+                    return;
+                }
+                
+                const headerStyle = { font: { bold: true, color: { rgb: "FFFFFFFF" } }, fill: { fgColor: { rgb: "FF404040" } } };
+                const wiHeaderStyle = { font: { bold: true, color: { rgb: "FFFFFFFF" } }, fill: { fgColor: { rgb: "FF166534" } } };
+                const nriHeaderStyle = { font: { bold: true, color: { rgb: "FFFFFFFF" } }, fill: { fgColor: { rgb: "FFB45309" } } };
+
+                const partyHeaders = [
+                    'Entity Name', 'Election Code', 'UMI', 
+                    'Pre-Election WI', 'Pre-Election NRI', 
+                    'Add\'l WI Acquired', 'Add\'l NRI Acquired', 
+                    activeProject.isApo ? 'Resulting APO WI' : 'Resulting BPO WI', 
+                    activeProject.isApo ? 'Resulting APO NRI' : 'Resulting BPO NRI'
+                ];
+                const partyData = calculatedParties.map(p => [
+                    p.entityName, p.electionCode, p.umi ? 'Yes' : 'No',
+                    { v: p.preElectionWI, t: 'n', z: '0.00000000' }, { v: p.preElectionNRI, t: 'n', z: '0.00000000' },
+                    { v: p.additionalWIAcquired, t: 'n', z: '0.00000000' }, { v: p.additionalNRIAcquired, t: 'n', z: '0.00000000' },
+                    { v: p.resultingBPOWI, t: 'n', z: '0.00000000' }, { v: p.resultingBPONRI, t: 'n', z: '0.00000000' }
+                ]);
+                const partyWorksheet = XLSX.utils.aoa_to_sheet([partyHeaders, ...partyData], { cellStyles: true });
+                partyHeaders.forEach((h, i) => {
+                    const cellAddress = XLSX.utils.encode_cell({ c: i, r: 0 });
+                    if (partyWorksheet[cellAddress]) {
+                        if (h.includes('WI')) partyWorksheet[cellAddress].s = wiHeaderStyle;
+                        else if (h.includes('NRI')) partyWorksheet[cellAddress].s = nriHeaderStyle;
+                        else partyWorksheet[cellAddress].s = headerStyle;
+                    }
+                });
+                partyWorksheet['!cols'] = Array(9).fill({wch: 18}); partyWorksheet['!cols'][0].wch = 25;
+
+                const summaryData = [
+                    ['Metric', 'Value'],
+                    ['Project Title', activeProject.title],
+                    ['Calculation Mode', activeProject.isApo ? 'After Payout (APO)' : 'Before Payout (BPO)'], [],
+                    ['Consent WI', { v: summary.consentWI, t: 'n', z: '0.00000000' }], ['Consent NRI', { v: summary.consentNRI, t: 'n', z: '0.00000000' }],
+                    ['Non-Consent WI', { v: summary.nonConsentWI, t: 'n', z: '0.00000000' }], ['Non-Consent NRI', { v: summary.nonConsentNRI, t: 'n', z: '0.00000000' }], [],
+                    ['Total Resulting WI', { v: summary.totalWI, t: 'n', z: '0.00000000' }], ['Total Resulting NRI', { v: summary.totalNRI, t: 'n', z: '0.00000000' }], [],
+                    ['Validation: Total WI = 1.0', summary.wiFlag ? `Error: Total is ${summary.totalWI}` : 'OK'],
+                    ['Validation: Absorption', summary.absorptionFlag ? 'Error: Unabsorbed WI exists' : 'OK']
+                ];
+                const summaryWorksheet = XLSX.utils.aoa_to_sheet(summaryData);
+                summaryWorksheet['A1'].s = headerStyle; summaryWorksheet['B1'].s = headerStyle;
+                summaryWorksheet['!cols'] = [{ wch: 25 }, { wch: 25 }];
+
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, partyWorksheet, 'Party Detail');
+                XLSX.utils.book_append_sheet(workbook, summaryWorksheet, 'Summary');
+                XLSX.writeFile(workbook, `${activeProject.title.replace(/[^a-z0-9]/gi, '_')}.xlsx`);
+            };
+            
+            const handleMouseDown = useCallback((index) => (e) => {
+                resizingColumnIndex.current = index;
+            }, []);
+
+            const handleMouseMove = useCallback((e) => {
+                if (resizingColumnIndex.current !== null) {
+                    setColumnWidths(prev => {
+                        const newWidths = [...prev];
+                        newWidths[resizingColumnIndex.current] = Math.max(50, newWidths[resizingColumnIndex.current] + e.movementX);
+                        return newWidths;
+                    });
+                }
+            }, []);
+
+            const handleMouseUp = useCallback(() => {
+                resizingColumnIndex.current = null;
+            }, []);
+
+            useEffect(() => {
+                window.addEventListener('mousemove', handleMouseMove);
+                window.addEventListener('mouseup', handleMouseUp);
+                return () => {
+                    window.removeEventListener('mousemove', handleMouseMove);
+                    window.removeEventListener('mouseup', handleMouseUp);
+                };
+            }, [handleMouseMove, handleMouseUp]);
+
+            const handleColumnAutoSize = useCallback((index) => {
+                const getTextWidth = (text, font) => {
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    context.font = font;
+                    return context.measureText(text).width;
+                };
+
+                const headerFont = 'bold 12px sans-serif';
+                const cellFont = '14px sans-serif';
+                
+                const headerText = tableHeaders[index];
+                let maxWidth = getTextWidth(headerText, headerFont);
+
+                calculatedParties.forEach(party => {
+                    let cellText = '';
+                    switch(index) {
+                        case 0: cellText = party.entityName; break;
+                        case 1: cellText = { '0': '0 - Non-Consent', '1': '1 - Participate', '2': '2 - Carry', '3': '3 - Carry + Excess' }[party.electionCode]; break;
+                        case 2: cellText = 'UMI'; break;
+                        case 3: cellText = party.preElectionWI.toFixed(8); break;
+                        case 4: cellText = party.preElectionNRI.toFixed(8); break;
+                        case 5: cellText = party.additionalWIAcquired.toFixed(8); break;
+                        case 6: cellText = party.additionalNRIAcquired.toFixed(8); break;
+                        case 7: cellText = party.resultingBPOWI.toFixed(8); break;
+                        case 8: cellText = party.resultingBPONRI.toFixed(8); break;
+                        case 9: cellText = 'Actions'; break;
+                    }
+                    const cellWidth = getTextWidth(cellText, cellFont);
+                    if (cellWidth > maxWidth) {
+                        maxWidth = cellWidth;
+                    }
+                });
+
+                setColumnWidths(prev => {
+                    const newWidths = [...prev];
+                    newWidths[index] = maxWidth + 20; // Add some padding
+                    return newWidths;
+                });
+            }, [calculatedParties]);
+
+
+            if (!activeProject) {
+                return (
+                     <div className="flex items-center justify-center h-full bg-gray-900">
+                        <div className="text-center">
+                            <h1 className="text-2xl font-bold text-white">No Projects Exist</h1>
+                            <p className="text-gray-400 mt-2">Create a new project to get started.</p>
+                            <button onClick={handleAddProject} className="mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">Create Project</button>
+                        </div>
+                    </div>
+                )
+            }
+            
+            const tableHeaders = [
+                'Entity Name', 'Election Code', 'UMI', 
+                'Pre-Election WI', 'Pre-Election NRI', 
+                'Add\'l WI Acquired', 'Add\'l NRI Acquired', 
+                activeProject.isApo ? 'Resulting APO WI' : 'Resulting BPO WI', 
+                activeProject.isApo ? 'Resulting APO NRI' : 'Resulting BPO NRI', 
+                'Actions'
+            ];
+
+            return (
+                <>
+                    <PasteDataModal isOpen={isPasteModalOpen} onClose={() => setIsPasteModalOpen(false)} onPaste={handlePasteData} />
+                    <div className="bg-gray-900 text-gray-200 min-h-screen font-sans p-4 sm:p-6 lg:p-8">
+                        <div className="max-w-7xl mx-auto">
+                            <header className="mb-4">
+                                <input type="text" value={activeProject.title} onChange={(e) => updateProject(activeProjectId, { title: e.target.value })} className="text-3xl font-bold text-white bg-transparent w-full focus:outline-none focus:ring-1 focus:ring-blue-500 rounded px-2 py-1 -ml-2" />
+                            </header>
+                            
+                            <div className="flex flex-col md:flex-row md:flex-wrap justify-between items-center mb-4 bg-gray-800 p-4 rounded-lg shadow-md gap-4">
+                                {/* Project & Party Controls */}
+                                <div className="flex items-center gap-2">
+                                     <label htmlFor="project-select" className="text-sm font-bold text-gray-300">Project:</label>
+                                    <select id="project-select" value={activeProjectId} onChange={(e) => setActiveProjectId(Number(e.target.value))} className="bg-gray-700 text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                        {projects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+                                    </select>
+                                    <Tooltip text="New Project">
+                                        <button onClick={handleAddProject} className="bg-blue-600 hover:bg-blue-700 text-white font-bold p-2 rounded-lg"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V8z" clipRule="evenodd" /></svg></button>
+                                    </Tooltip>
+                                    <Tooltip text="Duplicate Project">
+                                        <button onClick={handleDuplicateProject} className="bg-yellow-600 hover:bg-yellow-700 text-white font-bold p-2 rounded-lg"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M7 9a2 2 0 012-2h6a2 2 0 012 2v6a2 2 0 01-2 2H9a2 2 0 01-2-2V9z" /><path d="M5 3a2 2 0 00-2 2v6a2 2 0 002 2V5h8a2 2 0 00-2-2H5z" /></svg></button>
+                                    </Tooltip>
+                                     <Tooltip text="Delete Project">
+                                        <button onClick={handleDeleteProject} disabled={projects.length <= 1} className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded-lg disabled:bg-gray-500 disabled:cursor-not-allowed"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg></button>
+                                    </Tooltip>
+                                </div>
+                                <div className="flex items-center gap-4">
+                                     <Tooltip text="Add Party">
+                                        <button onClick={addParty} className="bg-purple-600 hover:bg-purple-700 text-white font-bold p-2 rounded-lg"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" /></svg></button>
+                                    </Tooltip>
+                                    <Tooltip text="Paste Data">
+                                        <button onClick={() => setIsPasteModalOpen(true)} className="bg-orange-600 hover:bg-orange-700 text-white font-bold p-2 rounded-lg"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" /><path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" /></svg></button>
+                                    </Tooltip>
+                                    <Tooltip text="Export to XLSX">
+                                        <button onClick={handleExport} disabled={!isExportReady} className="bg-green-600 hover:bg-green-700 text-white font-bold p-2 rounded-lg disabled:bg-gray-500"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" /></svg></button>
+                                    </Tooltip>
+                                </div>
+                                {/* APO/BPO Toggle */}
+                                <div className="flex items-center">
+                                    <span className={`mr-3 font-medium ${!activeProject.isApo ? 'text-blue-400' : 'text-gray-500'}`}>BPO</span>
+                                    <label className="flex items-center cursor-pointer">
+                                        <div className="relative"><input type="checkbox" className="sr-only" checked={activeProject.isApo} onChange={() => updateProject(activeProjectId, { isApo: !activeProject.isApo })} /><div className="block bg-gray-600 w-14 h-8 rounded-full"></div><div className={`dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform ${activeProject.isApo ? 'transform translate-x-full' : ''}`}></div></div>
+                                    </label>
+                                    <span className={`ml-3 font-medium ${activeProject.isApo ? 'text-blue-400' : 'text-gray-500'}`}>APO</span>
+                                </div>
+                            </div>
+                            <div className="overflow-x-auto bg-gray-800 rounded-lg shadow-lg">
+                                <table className="min-w-full divide-y divide-gray-700 table-fixed">
+                                    <thead className="bg-gray-700">
+                                        <tr>
+                                            {tableHeaders.map((h, i) => (
+                                                <th 
+                                                    key={h} 
+                                                    className="px-4 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider relative"
+                                                    style={{ width: `${columnWidths[i]}px` }}
+                                                    onDoubleClick={() => handleColumnAutoSize(i)}
+                                                >
+                                                    {h}
+                                                     <div 
+                                                        className="absolute top-0 right-0 h-full w-2 cursor-col-resize"
+                                                        onMouseDown={handleMouseDown(i)}
+                                                    />
+                                                </th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody className="bg-gray-800 divide-y divide-gray-700">
+                                        {calculatedParties.map(p => <PartyRow key={p.id} party={p} onPartyChange={handlePartyChange} onRemove={removeParty} columnWidths={columnWidths} />)}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div className="mt-6 p-4 bg-gray-800 rounded-lg shadow-md">
+                                <h2 className="text-xl font-semibold mb-4 text-white">Calculation Summary</h2>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    <SummaryCard title="Consent WI" value={summary.consentWI} /><SummaryCard title="Consent NRI" value={summary.consentNRI} />
+                                    <SummaryCard title="Non-Consent WI" value={summary.nonConsentWI} /><SummaryCard title="Non-Consent NRI" value={summary.nonConsentNRI} />
+                                </div>
+                                <div className="mt-4 border-t border-gray-700 pt-4">
+                                    <h3 className="text-lg font-semibold text-white">Totals & Validation</h3>
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
+                                        <SummaryCard title="Total Resulting WI" value={summary.totalWI} flag={summary.wiFlag} flagText="Total WI should be 1.0" />
+                                        <SummaryCard title="Total Resulting NRI" value={summary.totalNRI} />
+                                        <SummaryCard title="Unabsorbed WI" value={summary.absorptionFlag ? 'Error' : 'None'} flag={summary.absorptionFlag} flagText="Non-Consent WI not fully absorbed." />
+                                    </div>
+                                </div>
+                            </div>
+                            <ElectionCodeKey />
+                        </div>
+                    </div>
+                </>
+            );
+        };
+
+        const PartyRow = ({ party, onPartyChange, onRemove, columnWidths }) => {
+            const electionCodeColor = { '0': 'bg-red-900', '1': 'bg-blue-900', '2': 'bg-green-900', '3': 'bg-teal-900' };
+            const umiTooltipText = "Unleased Mineral Interest (Force-Pooled): Before payout, owner has 0% WI and a fixed 16% NRI. Their costs are carried by consenting parties. After payout, they can convert to their full participating interest.";
+            return (
+                <tr className="hover:bg-gray-700 transition-colors duration-150">
+                    <td style={{ width: `${columnWidths[0]}px` }} className="px-4 py-2"><input type="text" value={party.entityName} onChange={e => onPartyChange(party.id, 'entityName', e.target.value)} className="bg-transparent w-full focus:outline-none focus:ring-1 focus:ring-blue-500 rounded px-1" /></td>
+                    <td style={{ width: `${columnWidths[1]}px` }} className="px-4 py-2"><select value={party.electionCode} onChange={e => onPartyChange(party.id, 'electionCode', e.target.value)} className={`w-full focus:outline-none focus:ring-1 focus:ring-blue-500 rounded px-2 py-1 text-white border-none ${electionCodeColor[party.electionCode]}`}><option value="0">0 - Non-Consent</option><option value="1">1 - Participate</option><option value="2">2 - Carry</option><option value="3">3 - Carry + Excess</option></select></td>
+                    <td style={{ width: `${columnWidths[2]}px` }} className="px-4 py-2 text-center"><Tooltip text={umiTooltipText}><input type="checkbox" checked={party.umi} onChange={e => onPartyChange(party.id, 'umi', e.target.checked)} className="h-5 w-5 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500" /></Tooltip></td>
+                    
+                    <td style={{ width: `${columnWidths[3]}px` }} className="px-4 py-2">
+                        <EditableNumericCell value={party.preElectionWI} onCommit={(newValue) => onPartyChange(party.id, 'preElectionWI', newValue)} />
+                    </td>
+                    <td style={{ width: `${columnWidths[4]}px` }} className="px-4 py-2">
+                        <EditableNumericCell value={party.preElectionNRI} onCommit={(newValue) => onPartyChange(party.id, 'preElectionNRI', newValue)} />
+                    </td>
+
+                    {[
+                        { field: 'additionalWIAcquired', index: 5 }, { field: 'additionalNRIAcquired', index: 6 },
+                        { field: 'resultingBPOWI', index: 7 }, { field: 'resultingBPONRI', index: 8 },
+                    ].map(({ field, index }) => (
+                        <td key={field} style={{ width: `${columnWidths[index]}px` }} className="px-4 py-2">
+                            <span className={`w-full block text-right px-1 ${field.includes('WI') ? 'text-green-400' : 'text-yellow-400'} font-mono`}>{party[field]?.toFixed(8) || '0.00000000'}</span>
+                        </td>
+                    ))}
+                    <td style={{ width: `${columnWidths[9]}px` }} className="px-4 py-2 text-center"><button onClick={() => onRemove(party.id)} className="text-red-500 hover:text-red-400 font-bold">&times;</button></td>
+                </tr>
+            );
+        };
+
+        const SummaryCard = ({ title, value, flag = false, flagText = '' }) => (
+            <div className={`p-3 rounded-lg ${flag ? 'bg-red-500/20' : 'bg-gray-700'}`}>
+                <p className="text-sm text-gray-400">{title}</p>
+                <p className={`text-lg font-bold ${flag ? 'text-red-400' : 'text-white'} font-mono`}>{typeof value === 'number' ? value.toFixed(8) : value}</p>
+                {flag && <p className="text-xs text-red-400 mt-1">{flagText}</p>}
+            </div>
+        );
+
+        const ElectionCodeKey = () => (
+            <div className="mt-6 p-4 bg-gray-800 rounded-lg shadow-md">
+                <h2 className="text-xl font-semibold mb-4 text-white">Election Code Key</h2>
+                <div className="space-y-3">
+                    {[
+                        { code: '0', name: 'Non-Consent', desc: 'Party elects not to participate. Their interest is offered to consenting parties.', color: 'bg-red-900' },
+                        { code: '1', name: 'Participate', desc: 'Party pays its share and does not carry any non-consent interest.', color: 'bg-blue-900' },
+                        { code: '2', name: 'Carry', desc: 'Party pays its share and carries a proportionate part of the non-consent interest.', color: 'bg-green-900' },
+                        { code: '3', name: 'Carry + Excess', desc: 'Party pays its share, carries its proportionate part, and any excess non-consent interest.', color: 'bg-teal-900' },
+                    ].map(item => (
+                        <div key={item.code} className="flex items-start gap-4">
+                            <div className={`flex-shrink-0 w-32 text-center text-sm font-bold py-1 rounded ${item.color}`}>{`Code ${item.code}: ${item.name}`}</div>
+                            <p className="text-gray-300 text-sm">{item.desc}</p>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+
+        const container = document.getElementById('root');
+        const root = ReactDOM.createRoot(container);
+        root.render(<App />);
+    </script>
+</body>
+</html>
