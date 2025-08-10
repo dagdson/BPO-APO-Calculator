@@ -388,7 +388,7 @@
                 
                 if (pasteMode === 'ADD_NEW') {
                     const newParties = rows.map((row, index) => {
-                        const columns = row.split(/\s+/); // Use regex to split by any whitespace
+                        const columns = row.split('\t');
                         if (columns.length < 3) return null;
                         return {
                             id: Date.now() + index,
@@ -407,7 +407,7 @@
                     const orderedFields = Object.keys(fieldsToUpdate).filter(f => fieldsToUpdate[f]);
                     
                     rows.forEach(row => {
-                        const columns = row.split(/\s+/); // Use regex to split by any whitespace
+                        const columns = row.split('\t');
                         if (columns.length < 2) return;
                         const name = columns[0].trim();
                         const values = columns.slice(1);
